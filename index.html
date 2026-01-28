@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Vision CNC Pro - 智能探测增强版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="importmap">
+        {
+          "imports": {
+            "@google/generative-ai": "https://esm.run/@google/generative-ai"
+          }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&display=swap');
+        :root { --brand-cyan: #00f2ff; }
+        body { background-color: #030508; color: #e2e8f0; font-family: 'Inter', sans-serif; }
+        .terminal-font { font-family: 'Fira Code', monospace; }
+        .glass-panel { background: rgba(10, 15, 25, 0.8); border: 1px solid rgba(255, 255, 255, 0.08); backdrop-filter: blur(16px); }
+        .cyan-glow { box-shadow: 0 0 30px rgba(0, 242, 255, 0.1); }
+        .sim-grid { 
+            background-color: #05070a;
+            background-image: linear-gradient(rgba(0, 242, 255, 0.03) 1px, transparent 1px),
+                              linear-gradient(90deg, rgba(0, 242, 255, 0.03) 1px, transparent 1px);
+            background-size: 32px 32px;
+        }
+        .status-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+    </style>
+</head>
+<body class="p-4 md:p-6 min-h-screen">
+
+<div class="max-w-7xl mx-auto">
+    <!-- Header -->
+    <header class="flex justify-between items-center mb-8 border-b border-slate-800 pb-6">
+        <div class="flex items-center gap-4">
+            <div class="h-10 w-10 bg-cyan-500 rounded flex items-center justify-center font-black text-black shadow-[0_0_15px_rgba(6,182,212,0.5)]">AI</div>
+            <h1 class="text-2xl font-black text-white tracking-widest uppercase italic">Vision-to-CNC <span class="text-cyan-400">Stable</span></h1>
+        </div>
+        <div id="model-badge" class="px-4 py-1.5 rounded-full border border-slate-700 bg-slate-900/50 text-[10px] font-mono text-slate-400 flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-slate-600 shadow-sm" id="status-dot"></span>
+            <span id="active-model-name">Detecting Engine...</span>
+        </div>
+    </header>
+
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        
+        <!-- Input Column -->
+        <div class="lg:col-span-4 space-y-6">
+            <div class="glass-panel p-6 rounded-3xl cyan-glow">
+                <div id="drop-zone" class="border-2 border-dashed border-slate-800 rounded-2xl p-8 text-center hover:border-cyan-500 hover:bg-cyan-500/5 transition-all cursor-pointer group mb-4">
+                    <input type="file" id="file-input" class="hidden" accept="image/*,application/pdf">
+                    <div id="placeholder-content">
+                        <svg class="w-8 h-8 text-slate-600 mx-auto mb-2 group-hover:text-cyan-400 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                        <p class="text-xs text-slate-500 font-medium tracking-tight">上传工程图纸 (PDF/JPG/PNG)</p>
+                    </div>
+                    <div id="preview-content" class="hidden">
+                        <img id="img-preview" class="max-h-32 mx-auto rounded shadow-lg hidden">
+                        <div id="pdf-preview" class="hidden flex flex-col items-center">
+                            <div class="text-red-500 text-3xl font-bold">PDF</div>
+                            <p id="pdf-name" class="text-[10px] text-cyan-500 mt-1 truncate w-32"></p>
+                        </div>
+                    </div>
+                </div>
+
+                <textarea id="user-text" class="w-full bg-black/40 border border-slate-800 rounded-xl p-4 text-sm text-slate-300 focus:border-cyan-500 outline-none h-24 mb-4 font-sans leading-relaxed" placeholder="输入补充指令 (例如：槽深15mm, D10刀具进给500)"></textarea>
+
+                <button id="run-btn" class="w-full py-4 bg-cyan-600 hover:bg-cyan-500 text-black font-black rounded-xl shadow-lg shadow-cyan-900/20 active:scale-95 transition-all flex justify-center items-center gap-2">
+                    <span id="btn-label">生成 MPF 程序</span>
+                    <div id="loader" class="hidden w-4 h-4 border-2 border-black/20 border-t-black rounded-full animate-spin"></div>
+                </button>
+            </div>
+
+            <!-- Log Panel -->
+            <div class="glass-panel p-5 rounded-3xl">
+                <h3 class="text-[9px] font-bold text-slate-600 uppercase tracking-widest mb-3 flex justify-between">
+                    <span>Engine Logs</span>
+                    <span id="log-clear" class="cursor-pointer hover:text-cyan-400">Clear</span>
+                </h3>
+                <div id="log-window" class="terminal-font text-[10px] h-48 overflow-y-auto space-y-1.5 scrollbar-hide text-slate-500">
+                    <div>> System boot sequence complete.</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Simulation & Code Column -->
+        <div class="lg:col-span-8 space-y-6">
+            <div class="glass-panel rounded-3xl overflow-hidden shadow-2xl">
+                <div class="flex items-center justify-between p-4 bg-slate-900/30 border-b border-white/5">
+                    <h2 class="text-xs font-bold uppercase tracking-widest text-slate-400">Path Simulation</h2>
+                    <div id="sim-info" class="text-[10px] font-mono text-cyan-600 uppercase">Status: Idle</div>
+                </div>
+                <div class="sim-grid h-[380px] relative">
+                    <canvas id="sim-canvas" width="800" height="400" class="w-full h-full"></canvas>
+                </div>
+            </div>
+
+            <div class="glass-panel rounded-3xl overflow-hidden border border-white/5">
+                <div class="flex items-center justify-between p-4 border-b border-white/5 bg-slate-900/30">
+                    <h2 class="text-xs font-bold uppercase tracking-widest text-slate-400">Sinumerik 840D G-Code</h2>
+                    <button id="dl-btn" class="hidden px-4 py-1.5 bg-green-600 text-white text-[10px] font-bold rounded uppercase tracking-wider hover:bg-green-500">Download .MPF</button>
+                </div>
+                <pre id="gcode-view" class="terminal-font p-6 text-green-400/90 text-[11px] h-[250px] overflow-y-auto leading-relaxed">/* Wait for AI input... */</pre>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script type="module">
+    import { GoogleGenerativeAI } from "@google/generative-ai";
+
+    const API_KEY = "AIzaSyBA01IsWLtSWFE1MBikbPdgyKM6fOg0OnQ";
+    const genAI = new GoogleGenerativeAI(API_KEY);
+    
+    // --- 自动探测逻辑 ---
+    // 候选模型列表，按优先级排序
+    const MODEL_CANDIDATES = [
+        "gemini-1.5-flash-latest",
+        "gemini-1.5-flash",
+        "gemini-1.5-pro-latest",
+        "gemini-2.0-flash-exp" // 尝试最新实验版
+    ];
+    
+    let activeModel = null;
+    let fileData = { base64: null, mimeType: null };
+
+    const logWin = document.getElementById('log-window');
+    function addLog(msg, type = 'info') {
+        const div = document.createElement('div');
+        const colors = { info: 'text-slate-500', success: 'text-green-500', error: 'text-red-500', ai: 'text-cyan-400' };
+        div.className = colors[type];
+        div.innerHTML = `<span class="opacity-30 text-[8px] mr-2">${new Date().toLocaleTimeString().split(' ')[0]}</span> > ${msg}`;
+        logWin.appendChild(div);
+        logWin.scrollTop = logWin.scrollHeight;
+    }
+
+    // 模型探测引擎
+    async function probeAvailableModel() {
+        addLog("正在探测可用模型...", "info");
+        for (const modelName of MODEL_CANDIDATES) {
+            try {
+                const model = genAI.getGenerativeModel({ model: modelName });
+                // 发送极简测试请求
+                const test = await model.generateContent("test");
+                if (test) {
+                    activeModel = modelName;
+                    updateModelBadge(modelName, true);
+                    addLog(`探测成功: 已连接到 ${modelName}`, "success");
+                    return model;
+                }
+            } catch (e) {
+                addLog(`跳过不可用模型: ${modelName}`, "info");
+            }
+        }
+        addLog("致命错误: 未能发现可用模型，请检查代理网络！", "error");
+        updateModelBadge("Connection Failed", false);
+        return null;
+    }
+
+    function updateModelBadge(name, ok) {
+        document.getElementById('active-model-name').innerText = name;
+        const dot = document.getElementById('status-dot');
+        dot.className = `w-2 h-2 rounded-full ${ok ? 'bg-green-500 shadow-[0_0_8px_green]' : 'bg-red-500 shadow-[0_0_8px_red]'}`;
+    }
+
+    // --- 文件处理 ---
+    const fileInput = document.getElementById('file-input');
+    const dropZone = document.getElementById('drop-zone');
+    
+    dropZone.onclick = () => fileInput.click();
+    fileInput.onchange = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (f) => {
+            fileData.base64 = f.target.result.split(',')[1];
+            fileData.mimeType = file.type;
+            document.getElementById('placeholder-content').classList.add('hidden');
+            document.getElementById('preview-content').classList.remove('hidden');
+            if (file.type === 'application/pdf') {
+                document.getElementById('pdf-preview').classList.remove('hidden');
+                document.getElementById('img-preview').classList.add('hidden');
+                document.getElementById('pdf-name').innerText = file.name;
+            } else {
+                const img = document.getElementById('img-preview');
+                img.src = f.target.result;
+                img.classList.remove('hidden');
+                document.getElementById('pdf-preview').classList.add('hidden');
+            }
+            addLog(`载入文件: ${file.name}`, 'success');
+        };
+        reader.readAsDataURL(file);
+    };
+
+    // --- 核心执行流程 ---
+    document.getElementById('run-btn').onclick = async () => {
+        const btn = document.getElementById('run-btn');
+        const loader = document.getElementById('loader');
+        
+        if (!fileData.base64 && !document.getElementById('user-text').value) {
+            return alert("请上传图纸或输入指令！");
+        }
+
+        btn.disabled = true;
+        loader.classList.remove('hidden');
+        addLog("发起 AI 编译请求...", "ai");
+
+        try {
+            // 如果还没探测到模型，先探测一次
+            if (!activeModel) {
+                const probed = await probeAvailableModel();
+                if (!probed) throw new Error("No available models found. Check Network/Proxy.");
+            }
+
+            const model = genAI.getGenerativeModel({ model: activeModel });
+            const prompt = `你是一个资深西门子数控专家。分析图纸并输出纯 JSON 格式：
+            {
+                "part": "零件名",
+                "workpiece": {"w": 100, "h": 100},
+                "features": [
+                    {"type": "circle", "x": 50, "y": 50, "d": 40, "z": 10, "f": 800},
+                    {"type": "rect", "x": 50, "y": 50, "w": 30, "h": 30, "z": 5, "f": 600}
+                ]
+            }
+            注意：所有数值均为mm，坐标原点左下角。必须严格输出JSON，不要带Markdown。`;
+
+            const parts = [{ text: prompt + "\n用户描述: " + document.getElementById('user-text').value }];
+            if (fileData.base64) {
+                parts.push({ inlineData: { data: fileData.base64, mimeType: fileData.mimeType } });
+            }
+
+            const result = await model.generateContent(parts);
+            const response = await result.response;
+            const text = response.text().replace(/```json/g, '').replace(/```/g, '').trim();
+            
+            const data = JSON.parse(text);
+            addLog(`识别完成: ${data.part}`, "success");
+
+            // 生成 MPF
+            const mpf = generateMPF(data);
+            document.getElementById('gcode-view').innerText = mpf;
+
+            // 仿真
+            startSimulation(data);
+
+            const dlBtn = document.getElementById('dl-btn');
+            dlBtn.classList.remove('hidden');
+            dlBtn.onclick = () => {
+                const blob = new Blob([mpf], {type: 'text/plain'});
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = "X_AI_PROG.MPF";
+                a.click();
+            };
+
+        } catch (e) {
+            addLog(`执行失败: ${e.message}`, "error");
+            console.error(e);
+            // 失败后清除 activeModel 以便下次重新探测
+            activeModel = null; 
+        } finally {
+            btn.disabled = false;
+            loader.classList.add('hidden');
+        }
+    };
+
+    function generateMPF(data) {
+        let code = `%_N_X_AI_PROGRAM_MPF\n;$PATH=/_N_MPF_DIR\n; Part: ${data.part}\n`;
+        code += `G17 G90 G54 G710\nT="CUTTER_10" M6\nS2200 M3\n`;
+        data.features.forEach(f => {
+            code += `\n; Feature: ${f.type}\nG0 X${f.x} Y${f.y} Z5\n`;
+            if (f.type === 'circle') {
+                code += `POCKET4(10, 0, 2, -${f.z}, ${f.d/2}, 0, ${f.f}, ${f.f}, 0, 21, 2, 0, 0, 0)\n`;
+            } else {
+                code += `POCKET3(10, 0, 2, -${f.z}, ${f.w}, ${f.h}, 0, ${f.x}, ${f.y}, 0, ${f.f}, ${f.f}, 0, 21, 2, 0, 0, 0, 0, 0)\n`;
+            }
+        });
+        code += `\nG0 Z100\nM30`;
+        return code;
+    }
+
+    function startSimulation(data) {
+        const canvas = document.getElementById('sim-canvas');
+        const ctx = canvas.getContext('2d');
+        const info = document.getElementById('sim-info');
+        let frame = 0;
+        const scale = 3.2;
+        const offX = canvas.width/2 - (data.workpiece.w*scale/2);
+        const offY = canvas.height/2 + (data.workpiece.h*scale/2);
+
+        function play() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            // Draw Workpiece
+            ctx.strokeStyle = '#1e293b';
+            ctx.strokeRect(offX, offY - data.workpiece.h*scale, data.workpiece.w*scale, data.workpiece.h*scale);
+            
+            data.features.forEach((f, idx) => {
+                const p = Math.min(Math.max((frame - idx*30)/30, 0), 1);
+                if (p <= 0) return;
+                ctx.beginPath();
+                ctx.strokeStyle = '#06b6d4';
+                ctx.lineWidth = 2;
+                const fx = offX + f.x*scale;
+                const fy = offY - f.y*scale;
+                if (f.type === 'circle') {
+                    ctx.arc(fx, fy, (f.d/2)*scale, 0, Math.PI*2*p);
+                } else {
+                    ctx.strokeRect(fx - (f.w*scale/2), fy - (f.h*scale/2), f.w*scale*p, f.h*scale*p);
+                }
+                ctx.stroke();
+            });
+
+            if (frame < (data.features.length*30 + 30)) {
+                frame++;
+                requestAnimationFrame(play);
+                info.innerText = "Running Path...";
+            } else {
+                info.innerText = "Simulation Complete";
+            }
+        }
+        play();
+    }
+
+    // 启动时自动探测
+    probeAvailableModel();
+</script>
+
+</body>
+</html>
